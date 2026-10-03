@@ -22,7 +22,7 @@ export class VisionSocket {
     this.callback = callback;
 
     this.socket = new WebSocket(
-      "ws://127.0.0.1:8000/ws/vision"
+      "wss://marvel-vision.onrender.com/ws/vision"
     );
 
     this.socket.binaryType = "blob";
