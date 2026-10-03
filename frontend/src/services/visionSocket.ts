@@ -1,137 +1,151 @@
 import type { VisionResult } from "../models/vision";
 
-type VisionCallback = (
-  result: VisionResult
-) => void;
-
+type VisionCallback = (result: VisionResult) => void;
 
 export class VisionSocket {
-
   private socket: WebSocket | null = null;
-
   private callback: VisionCallback | null = null;
 
-  private selectedPower: string =
-    "SPIDER_MAN";
+  private selectedPower = "SPIDER_MAN";
 
+  private reconnectTimer: number | null = null;
+  private reconnectAttempts = 0;
+  private shouldReconnect = false;
 
-  connect(
-    callback: VisionCallback
-  ) {
+  private readonly url =
+    "wss://marvel-vision.onrender.com/ws/vision";
 
+  connect(callback: VisionCallback) {
     this.callback = callback;
+    this.shouldReconnect = true;
+    this.reconnectAttempts = 0;
 
-    this.socket = new WebSocket(
-      "wss://marvel-vision.onrender.com/ws/vision"
+    this.createConnection();
+  }
+
+  private createConnection() {
+    if (!this.shouldReconnect) return;
+
+    // Don't create another socket if one is already active.
+    if (
+      this.socket &&
+      (
+        this.socket.readyState === WebSocket.OPEN ||
+        this.socket.readyState === WebSocket.CONNECTING
+      )
+    ) {
+      return;
+    }
+
+    console.log(
+      "VISION SOCKET: CONNECTING...",
+      `attempt=${this.reconnectAttempts + 1}`
     );
 
-    this.socket.binaryType = "blob";
+    const socket = new WebSocket(this.url);
 
+    socket.binaryType = "blob";
 
-    this.socket.onopen = () => {
+    this.socket = socket;
 
+    socket.onopen = () => {
+      console.log("VISION SOCKET: CONNECTED");
+
+      this.reconnectAttempts = 0;
+
+      // Always send the currently selected hero
       console.log(
-        "VISION SOCKET: CONNECTED"
-      );
-
-      // Send currently selected hero
-      this.sendPower(
+        "VISION SOCKET: POWER SELECTED:",
         this.selectedPower
       );
 
+      socket.send(
+        JSON.stringify({
+          type: "power_select",
+          power: this.selectedPower,
+        })
+      );
     };
 
-
-    this.socket.onmessage = (
-      event
-    ) => {
-
+    socket.onmessage = (event) => {
       try {
+        const result: VisionResult = JSON.parse(event.data);
 
-        const result: VisionResult =
-          JSON.parse(event.data);
-
-        this.callback?.(
-          result
-        );
-
+        this.callback?.(result);
       } catch (error) {
-
         console.error(
           "VISION SOCKET: INVALID RESPONSE",
           error
         );
-
       }
-
     };
 
-
-    this.socket.onerror = (
-      error
-    ) => {
-
+    socket.onerror = (error) => {
       console.error(
         "VISION SOCKET ERROR:",
         error
       );
-
     };
 
-
-    this.socket.onclose = () => {
-
+    socket.onclose = (event) => {
       console.log(
-        "VISION SOCKET: DISCONNECTED"
+        "VISION SOCKET: DISCONNECTED",
+        `code=${event.code}`,
+        `reason=${event.reason || "none"}`
       );
 
-    };
-
-  }
-
-
-  sendFrame(
-    frame: Blob
-  ): boolean {
-
-    if (
-      this.socket &&
-      this.socket.readyState ===
-        WebSocket.OPEN
-    ) {
-
-      try {
-        this.socket.send(frame);
-        return true;
-      } catch (error) {
-        console.error(
-          "VISION SOCKET: FRAME SEND FAILED",
-          error
-        );
+      if (!this.shouldReconnect) {
+        return;
       }
 
+      this.scheduleReconnect();
+    };
+  }
+
+  private scheduleReconnect() {
+    if (!this.shouldReconnect) return;
+
+    if (this.reconnectTimer !== null) {
+      return;
+    }
+
+    this.reconnectAttempts += 1;
+
+    // 1s → 2s → 4s → 5s maximum
+    const delay = Math.min(
+      1000 * Math.pow(2, this.reconnectAttempts - 1),
+      5000
+    );
+
+    console.log(
+      `VISION SOCKET: RECONNECTING IN ${delay}ms`
+    );
+
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null;
+      this.createConnection();
+    }, delay);
+  }
+
+  sendFrame(frame: Blob) {
+    if (
+      this.socket &&
+      this.socket.readyState === WebSocket.OPEN
+    ) {
+      this.socket.send(frame);
+      return true;
     }
 
     return false;
-
   }
 
-
-  sendPower(
-    power: string
-  ) {
-
-    // Always remember latest selection
-    this.selectedPower =
-      power;
-
+  sendPower(power: string) {
+    this.selectedPower = power;
 
     if (
       this.socket &&
-      this.socket.readyState ===
-        WebSocket.OPEN
+      this.socket.readyState === WebSocket.OPEN
     ) {
-
       console.log(
         "VISION SOCKET: POWER SELECTED:",
         power
@@ -143,22 +157,24 @@ export class VisionSocket {
           power,
         })
       );
-
     }
-
   }
-
 
   disconnect() {
+    console.log("VISION SOCKET: MANUAL DISCONNECT");
 
-    if (this.socket) {
+    this.shouldReconnect = false;
 
-      this.socket.close();
-
-      this.socket = null;
-
+    if (this.reconnectTimer !== null) {
+      window.clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
     }
 
-  }
+    if (this.socket) {
+      this.socket.close();
+      this.socket = null;
+    }
 
+    this.callback = null;
+  }
 }
