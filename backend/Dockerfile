@@ -7,6 +7,8 @@ RUN apt-get update \
         ffmpeg \
         libglib2.0-0 \
         libgl1 \
+        libegl1 \
+        libgles2 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
