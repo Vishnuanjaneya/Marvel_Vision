@@ -9,6 +9,7 @@ RUN apt-get update \
         libgl1 \
         libegl1 \
         libgles2 \
+        libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
